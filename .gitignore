@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+venv/
+.venv/
+
+# Flask session files
+.flask_session/
+flask_session/
+
+# OS
+.DS_Store
+Thumbs.db

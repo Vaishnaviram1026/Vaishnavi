@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MySkillCoach — Skill Matching</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- Loader overlay -->
+<div class="loader-overlay" id="loader">
+  <div class="spinner"></div>
+  <div class="loader-msg">Loading AI-powered skill analysis…</div>
+</div>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <span class="brand">&#127919; MySkillCoach</span>
+  <div class="steps">
+    <a href="/upload" class="step-pill done">&#10003; 1 · Upload</a>
+    <span style="color:var(--muted)">›</span>
+    <span class="step-pill active">2 · Match</span>
+    <span style="color:var(--muted)">›</span>
+    <span class="step-pill">3 · Analysis</span>
+  </div>
+</nav>
+
+<div class="container">
+
+  <!-- Page heading -->
+  <div style="margin-bottom:28px">
+    <h1 style="font-size:1.75rem;font-weight:800;color:var(--white)">Skill Matching</h1>
+    <p style="color:var(--muted);margin-top:6px">
+      Comparing your resume against live <strong style="color:var(--orange)">{{ career_goal }}</strong> job postings.
+    </p>
+  </div>
+
+  <!-- Readiness score card -->
+  <div class="readiness-card">
+    <div class="readiness-score" id="scoreDisplay">{{ readiness }}%</div>
+    <div class="readiness-label">Career Readiness Score</div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progressBar" style="width:{{ readiness }}%"></div>
+    </div>
+    <p id="readinessText" style="color:var(--muted);font-size:0.9rem;margin-bottom:20px">
+      {% if readiness >= 80 %}
+        You're in great shape! Polish your application and apply confidently.
+      {% elif readiness >= 50 %}
+        Good foundation — a few targeted improvements will make you competitive.
+      {% else %}
+        Keep building — focus on the gap skills below to boost your readiness.
+      {% endif %}
+    </p>
+    <a href="/analysis" class="btn btn-primary" style="font-size:1rem;padding:13px 32px">
+      See Full Analysis &#8250;
+    </a>
+  </div>
+
+  <!-- Skill match table -->
+  <div class="card">
+    <h2>&#128202; Skill Comparison Table</h2>
+    <p style="color:var(--muted);font-size:0.83rem;margin-bottom:18px">
+      Adjust your self-assessed level using the dropdowns — the score updates live.
+    </p>
+
+    <div style="overflow-x:auto">
+      <table class="skill-table" id="skillTable">
+        <thead>
+          <tr>
+            <th>Skill</th>
+            <th>Your Level</th>
+            <th>Required Level</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr id="row-{{ loop.index0 }}" data-skill="{{ row.skill }}" data-required="{{ row.required_level }}">
+            <td>
+              <span style="font-weight:600">{{ row.skill }}</span>
+              {% if row.in_resume %}
+              <span style="font-size:0.7rem;color:var(--muted);margin-left:6px">&#128196; in resume</span>
+              {% endif %}
+            </td>
+            <td>
+              <select class="level-select" data-skill="{{ row.skill }}" onchange="onLevelChange()">
+                {% for lvl in levels %}
+                <option value="{{ lvl }}" {% if row.student_level == lvl %}selected{% endif %}>{{ lvl }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <span style="color:var(--muted);font-weight:600">{{ row.required_level }}</span>
+            </td>
+            <td>
+              <span class="badge badge-{{ row.status | lower }}" id="status-{{ loop.index0 }}">
+                {% if row.status == 'Met' %}&#10003; Met
+                {% elif row.status == 'Gap' %}&#9651; Gap
+                {% else %}&#215; Missing{% endif %}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Chart row -->
+  <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:24px">
+    <!-- Donut chart -->
+    <div class="card" style="flex:1;min-width:220px;text-align:center">
+      <h2>&#127775; Readiness Breakdown</h2>
+      <canvas id="donutChart" height="200"></canvas>
+      <div style="display:flex;gap:12px;justify-content:center;margin-top:14px;flex-wrap:wrap">
+        <span class="badge badge-met">&#10003; Met</span>
+        <span class="badge badge-gap">&#9651; Gap</span>
+        <span class="badge badge-missing">&#215; Missing</span>
+      </div>
+    </div>
+
+    <!-- Bar chart -->
+    <div class="card" style="flex:2;min-width:280px">
+      <h2>&#128200; Skill Level Gap</h2>
+      <canvas id="barChart" height="200"></canvas>
+    </div>
+  </div>
+
+  <!-- Soft skills -->
+  <div class="card">
+    <h2>&#129309; Recommended Soft Skills</h2>
+    <p style="color:var(--muted);font-size:0.85rem;margin-bottom:14px">
+      Based on your profile and live job postings for <strong style="color:var(--orange)">{{ career_goal }}</strong>.
+    </p>
+    <div class="badge-wrap">
+      {% for skill in soft_skills %}
+      <span class="badge badge-soft">&#127775; {{ skill }}</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Bottom nav -->
+  <div style="display:flex;gap:12px;flex-wrap:wrap">
+    <a href="/upload" class="btn btn-outline">&#8249; Back to Upload</a>
+    <a href="/analysis" class="btn btn-primary" style="margin-left:auto">Full Analysis &#8250;</a>
+  </div>
+
+</div>
+
+<!-- ── JavaScript ────────────────────────────────────────────────────────── -->
+<script>
+/* ── Data from Flask ─────────────────────────────────────────────────── */
+const LEVEL_RANK = { "Beginner": 1, "Mid": 2, "Advanced": 3, "Not Sure": 0 };
+
+const rowsData = {{ rows | tojson }};
+let currentRows = rowsData.map(r => Object.assign({}, r));
+
+/* ── Charts ──────────────────────────────────────────────────────────── */
+const CHART_COLORS = {
+  met:     'rgba(39,174,96,0.85)',
+  gap:     'rgba(230,126,34,0.85)',
+  missing: 'rgba(231,76,60,0.85)',
+  orange:  'rgba(232,97,26,0.85)',
+  muted:   'rgba(139,163,188,0.6)',
+};
+
+function countStatuses(rows) {
+  let met = 0, gap = 0, missing = 0;
+  rows.forEach(r => {
+    if (r.status === 'Met') met++;
+    else if (r.status === 'Gap') gap++;
+    else missing++;
+  });
+  return { met, gap, missing };
+}
+
+// Donut chart
+const donutCtx = document.getElementById('donutChart').getContext('2d');
+const { met: m0, gap: g0, missing: ms0 } = countStatuses(currentRows);
+const donutChart = new Chart(donutCtx, {
+  type: 'doughnut',
+  data: {
+    labels: ['Met', 'Gap', 'Missing'],
+    datasets: [{
+      data: [m0, g0, ms0],
+      backgroundColor: [CHART_COLORS.met, CHART_COLORS.gap, CHART_COLORS.missing],
+      borderWidth: 0,
+    }]
+  },
+  options: {
+    cutout: '65%',
+    plugins: { legend: { display: false } },
+    animation: { duration: 400 },
+  }
+});
+
+// Bar chart: student vs required level per skill
+const barLabels  = currentRows.map(r => r.skill);
+const barStudent = currentRows.map(r => LEVEL_RANK[r.student_level] || 0);
+const barReq     = currentRows.map(r => LEVEL_RANK[r.required_level] || 2);
+
+const barCtx = document.getElementById('barChart').getContext('2d');
+const barChart = new Chart(barCtx, {
+  type: 'bar',
+  data: {
+    labels: barLabels,
+    datasets: [
+      {
+        label: 'Your Level',
+        data: barStudent,
+        backgroundColor: CHART_COLORS.orange,
+        borderRadius: 4,
+      },
+      {
+        label: 'Required',
+        data: barReq,
+        backgroundColor: CHART_COLORS.muted,
+        borderRadius: 4,
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    scales: {
+      x: {
+        ticks: { color: '#8ba3bc', font: { size: 10 } },
+        grid:  { color: 'rgba(255,255,255,0.04)' },
+      },
+      y: {
+        min: 0, max: 3,
+        ticks: {
+          color: '#8ba3bc',
+          callback: v => ['', 'Beginner', 'Mid', 'Advanced'][v] || '',
+        },
+        grid: { color: 'rgba(255,255,255,0.06)' },
+      }
+    },
+    plugins: {
+      legend: { labels: { color: '#f0f4f8', font: { size: 11 } } }
+    },
+    animation: { duration: 400 },
+  }
+});
+
+/* ── Live recalculation ───────────────────────────────────────────────── */
+function onLevelChange() {
+  // Collect current dropdown values
+  const skillLevels = {};
+  document.querySelectorAll('.level-select').forEach(sel => {
+    skillLevels[sel.dataset.skill] = sel.value;
+  });
+
+  // Optimistic local update
+  currentRows.forEach(row => {
+    const newLevel = skillLevels[row.skill] || row.student_level;
+    row.student_level = newLevel;
+    const stuRank = LEVEL_RANK[newLevel] || 0;
+    const reqRank = LEVEL_RANK[row.required_level] || 2;
+    if (stuRank === 0) row.status = 'Missing';
+    else if (stuRank >= reqRank) row.status = 'Met';
+    else row.status = 'Gap';
+  });
+
+  updateStatusBadges(currentRows);
+  updateScoreUI(currentRows);
+  updateCharts(currentRows);
+
+  // Also sync with server (for session persistence)
+  fetch('/api/recalculate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skill_levels: skillLevels }),
+  }).catch(() => {});   // fire-and-forget; UI already updated
+}
+
+function updateStatusBadges(rows) {
+  rows.forEach((row, i) => {
+    const el = document.getElementById('status-' + i);
+    if (!el) return;
+    el.className = 'badge badge-' + row.status.toLowerCase();
+    if (row.status === 'Met')     el.innerHTML = '&#10003; Met';
+    else if (row.status === 'Gap') el.innerHTML = '&#9651; Gap';
+    else                           el.innerHTML = '&#215; Missing';
+  });
+}
+
+function updateScoreUI(rows) {
+  const required = {{ rows | selectattr('status', 'ne', 'Met') | list | length + rows | selectattr('status', 'equalto', 'Met') | list | length }};
+  const met = rows.filter(r => r.status === 'Met').length;
+  const total = {{ rows | length }};
+  const score = Math.round((met / total) * 100);
+
+  document.getElementById('scoreDisplay').textContent = score + '%';
+  document.getElementById('progressBar').style.width  = score + '%';
+
+  let msg = '';
+  if (score >= 80)      msg = "You're in great shape! Polish your application and apply confidently.";
+  else if (score >= 50) msg = "Good foundation — a few targeted improvements will make you competitive.";
+  else                  msg = "Keep building — focus on the gap skills below to boost your readiness.";
+  document.getElementById('readinessText').textContent = msg;
+}
+
+function updateCharts(rows) {
+  const { met, gap, missing } = countStatuses(rows);
+  donutChart.data.datasets[0].data = [met, gap, missing];
+  donutChart.update();
+
+  barChart.data.datasets[0].data = rows.map(r => LEVEL_RANK[r.student_level] || 0);
+  barChart.update();
+}
+
+// Show loader while navigating to /match (page may take a moment due to OpenAI calls)
+window.addEventListener('load', () => {
+  document.getElementById('loader').classList.remove('show');
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MySkillCoach — Resume Upload</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+<!-- Loader overlay -->
+<div class="loader-overlay" id="loader">
+  <div class="spinner"></div>
+  <div class="loader-msg">Analyzing your resume & fetching live job data…</div>
+</div>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <span class="brand">&#127919; MySkillCoach</span>
+  <div class="steps">
+    <span class="step-pill active">1 · Upload</span>
+    <span style="color:var(--muted)">›</span>
+    <span class="step-pill">2 · Match</span>
+    <span style="color:var(--muted)">›</span>
+    <span class="step-pill">3 · Analysis</span>
+  </div>
+</nav>
+
+<div class="container">
+
+  <!-- Page heading -->
+  <div style="margin-bottom:28px">
+    <h1 style="font-size:1.75rem;font-weight:800;color:var(--white)">Resume Upload</h1>
+    <p style="color:var(--muted);margin-top:6px">Upload your PDF resume and select a career goal to get started.</p>
+  </div>
+
+  <!-- Error alert -->
+  {% if error %}
+  <div class="alert alert-error">⚠ {{ error }}</div>
+  {% endif %}
+
+  <!-- Upload form -->
+  <div class="card">
+    <h2>&#128196; Your Resume</h2>
+    <form method="POST" action="/upload" enctype="multipart/form-data" id="uploadForm">
+
+      <!-- Career goal -->
+      <div class="form-group">
+        <label for="career_goal">Career Goal</label>
+        <select name="career_goal" id="career_goal">
+          {% for goal in career_goals %}
+          <option value="{{ goal }}" {% if selected_goal == goal %}selected{% endif %}>{{ goal }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- File upload zone -->
+      <div class="form-group">
+        <label>Resume PDF</label>
+        <div class="upload-zone" id="dropZone" onclick="document.getElementById('resumeInput').click()">
+          <div class="icon">&#128196;</div>
+          <p><strong style="color:var(--white)">Click to upload</strong> or drag & drop your PDF here</p>
+          <p>PDF files only · Max 10 MB</p>
+          <div class="file-name" id="fileName"></div>
+          <input type="file" name="resume" id="resumeInput" accept=".pdf" required />
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="submitBtn">
+        &#128269; Analyze Resume
+      </button>
+    </form>
+  </div>
+
+  <!-- Results section (shown after upload) -->
+  {% if show_results %}
+
+  <!-- Stats strip -->
+  <div class="stat-strip">
+    <div class="stat-box">
+      <div class="num">{{ student_skills | length }}</div>
+      <div class="lbl">Skills Found</div>
+    </div>
+    <div class="stat-box">
+      <div class="num">{{ required_skills | length }}</div>
+      <div class="lbl">Required Skills</div>
+    </div>
+    <div class="stat-box">
+      <div class="num">{{ jobs_found }}</div>
+      <div class="lbl">Live Jobs Scanned</div>
+    </div>
+  </div>
+
+  <!-- Student skills -->
+  <div class="card">
+    <h2>&#10024; Skills Found in Your Resume</h2>
+    {% if student_skills %}
+    <div class="badge-wrap">
+      {% for skill in student_skills %}
+      <span class="badge badge-skill">
+        {{ skill }}
+        {% if skill_counts[skill] > 1 %}
+          <span style="font-weight:400;opacity:0.7">&times;{{ skill_counts[skill] }}</span>
+        {% endif %}
+      </span>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:var(--muted)">No matching skills detected. Try a more detailed resume.</p>
+    {% endif %}
+  </div>
+
+  <!-- Required skills from JSearch -->
+  <div class="card">
+    <h2>&#128188; Top Required Skills for {{ selected_goal }}</h2>
+    <p style="color:var(--muted);font-size:0.85rem;margin-bottom:14px">
+      Extracted from {{ jobs_found }} live job postings via JSearch API
+    </p>
+    <div class="badge-wrap">
+      {% for skill in required_skills %}
+        {% if skill in student_skills %}
+        <span class="badge badge-met">&#10003; {{ skill }}</span>
+        {% else %}
+        <span class="badge badge-missing">&#43; {{ skill }}</span>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <p style="margin-top:14px;font-size:0.8rem;color:var(--muted)">
+      &#10003; Green = you have it &nbsp;&nbsp; &#43; Red = gap to fill
+    </p>
+  </div>
+
+  <!-- Next button -->
+  <div style="text-align:center">
+    <a href="/match" class="btn btn-primary" style="font-size:1rem;padding:14px 36px">
+      Next: Match Skills &#8250;
+    </a>
+  </div>
+
+  {% endif %}
+</div>
+
+<script>
+  // File pick display
+  const input    = document.getElementById('resumeInput');
+  const fileName = document.getElementById('fileName');
+  const dropZone = document.getElementById('dropZone');
+  const form     = document.getElementById('uploadForm');
+  const loader   = document.getElementById('loader');
+
+  input.addEventListener('change', () => {
+    if (input.files[0]) fileName.textContent = '✓ ' + input.files[0].name;
+  });
+
+  // Drag & drop
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type === 'application/pdf') {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      fileName.textContent = '✓ ' + file.name;
+    }
+  });
+
+  // Show loader on submit
+  form.addEventListener('submit', () => {
+    if (input.files[0]) loader.classList.add('show');
+  });
+</script>
+
+</body>
+</html>

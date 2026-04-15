@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MySkillCoach — AI Analysis</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">&#127919; MySkillCoach</span>
+  <div class="steps">
+    <a href="/upload" class="step-pill done">&#10003; 1 · Upload</a>
+    <span class="text-muted">›</span>
+    <a href="/skills" class="step-pill done">&#10003; 2 · Skills</a>
+    <span class="text-muted">›</span>
+    <span class="step-pill active">3 · Analysis</span>
+  </div>
+</nav>
+
+<div class="container">
+
+  {% if api_key_missing %}
+    <div class="alert alert-warning">
+      <strong>Groq API key not set.</strong>
+      AI analysis unavailable. Set <code>GROQ_API_KEY</code> to enable it.
+    </div>
+  {% endif %}
+
+  <!-- Readiness Ring + Score -->
+  <div class="readiness-card">
+    <div class="score-section" style="justify-content:center">
+
+      <div class="ring-wrap">
+        <svg width="140" height="140" viewBox="0 0 140 140">
+          <circle class="ring-bg"   cx="70" cy="70" r="54"/>
+          <circle class="ring-fill" cx="70" cy="70" r="54"
+            stroke-dasharray="{{ circumference }}"
+            stroke-dashoffset="{{ circumference }}"
+            id="ringFill"/>
+        </svg>
+        <div class="ring-text">
+          <div class="ring-score" id="scoreCounter">0</div>
+          <div class="ring-label">/ 10</div>
+        </div>
+      </div>
+
+      <div class="score-details">
+        <div class="readiness-label" style="margin-bottom:10px;text-align:left">
+          AI Readiness Score &mdash;
+          <strong style="color:var(--orange)">{{ career_goal }}</strong>
+        </div>
+        {% if assessment %}
+          <p style="color:var(--white);font-size:0.92rem;line-height:1.6;margin-bottom:14px">
+            {{ assessment }}
+          </p>
+        {% endif %}
+        {% if strengths %}
+          <div style="font-size:0.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">
+            Your Strengths
+          </div>
+          <div class="strengths-list">
+            {% for s in strengths %}
+              <span class="strength-tag">{{ s }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Skill Gap Bar Chart -->
+  <div class="card">
+    <h2>&#128200; Skill Gap Visualization</h2>
+    <div class="bar-legend">
+      <div class="bar-legend-item"><div class="bl-dot" style="background:var(--green)"></div> Strong</div>
+      <div class="bar-legend-item"><div class="bl-dot" style="background:#3498db"></div> Met</div>
+      <div class="bar-legend-item"><div class="bl-dot" style="background:var(--red)"></div> Gap</div>
+      <div class="bar-legend-item">
+        <div class="bl-dot" style="background:var(--muted);border-radius:2px;width:3px;height:10px"></div>
+        Required level marker
+      </div>
+    </div>
+    {% for item in breakdown %}
+    <div class="bar-row">
+      <div class="bar-label">
+        <span class="skill-nm">{{ item.skill }}</span>
+        <span class="text-muted">{{ item.your_label }} / {{ item.req_label }} required</span>
+      </div>
+      <div class="bar-track">
+        <div class="bar-your color-{{ item.css }}"
+             style="width:0%"
+             data-target="{{ item.your_pct }}"
+             id="bar_{{ loop.index }}">
+        </div>
+        <div class="bar-req-marker" style="left:calc({{ item.req_pct }}% - 1.5px)"></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Breakdown Table -->
+  <div class="card">
+    <h2>&#128203; Skill Breakdown</h2>
+    <table class="skill-table">
+      <thead>
+        <tr>
+          <th>Skill</th>
+          <th>Your Level</th>
+          <th>Required Level</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in breakdown %}
+        <tr>
+          <td style="font-weight:600">{{ item.skill }}</td>
+          <td>{{ item.your_label }}</td>
+          <td>{{ item.req_label }}</td>
+          <td>
+            <span class="badge badge-{{ item.css }}">
+              {% if item.status == 'Strong' %}&#8679; Strong
+              {% elif item.status == 'Met'  %}&#10003; Met
+              {% else %}&#9651; Gap{% endif %}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- What to Do Next -->
+  {% if resources %}
+  <div class="card">
+    <h2>&#127775; What to Do Next</h2>
+    <p class="text-muted" style="font-size:0.88rem;margin-bottom:18px">
+      One free resource for each skill you need to develop.
+    </p>
+    <div class="resource-grid">
+      {% for skill, res in resources.items() %}
+      <div class="resource-card">
+        <div class="res-skill">{{ skill }}</div>
+        <div class="res-title">{{ res.title }}</div>
+        <span class="res-type">{{ res.type }}</span>
+        <br>
+        <a class="res-link" href="{{ res.url }}" target="_blank" rel="noopener">
+          Start Learning &rarr;
+        </a>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="action-row">
+    <a href="/skills" class="btn btn-outline">&#8249; Edit Skill Levels</a>
+    <a href="/upload" class="btn btn-primary" style="margin-left:auto">Analyze Another Resume</a>
+  </div>
+
+</div>
+
+<script>
+  const TARGET_SCORE  = {{ score }};
+  const CIRCUMFERENCE = {{ circumference }};
+  const DASH_OFFSET   = {{ dash_offset }};
+
+  // Animate score counter
+  let current = 0;
+  const counter = document.getElementById('scoreCounter');
+  const interval = setInterval(() => {
+    current = Math.min(current + TARGET_SCORE / 40, TARGET_SCORE);
+    counter.textContent = Math.round(current);
+    if (current >= TARGET_SCORE) clearInterval(interval);
+  }, 30);
+
+  // Animate ring
+  const ring = document.getElementById('ringFill');
+  if (ring) {
+    requestAnimationFrame(() => {
+      setTimeout(() => { ring.style.strokeDashoffset = DASH_OFFSET; }, 100);
+    });
+  }
+
+  // Animate bars
+  document.querySelectorAll('.bar-your').forEach(bar => {
+    setTimeout(() => { bar.style.width = bar.dataset.target + '%'; }, 200);
+  });
+</script>
+</body>
+</html>

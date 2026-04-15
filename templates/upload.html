@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MySkillCoach — Upload Resume</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">&#127919; MySkillCoach</span>
+  <div class="steps">
+    <span class="step-pill active">1 · Upload</span>
+    <span class="text-muted">›</span>
+    <span class="step-pill">2 · Skills</span>
+    <span class="text-muted">›</span>
+    <span class="step-pill">3 · Analysis</span>
+  </div>
+</nav>
+
+<div class="container-sm">
+  <div class="card">
+    <h2>&#128196; Upload Your Resume</h2>
+
+    {% if error %}
+      <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+    {% if api_key_missing %}
+      <div class="alert alert-warning">
+        <strong>API key not set.</strong>
+        Set <code>GROQ_API_KEY</code> to enable AI analysis.
+        Set <code>JSEARCH_API_KEY</code> for real job data.
+      </div>
+    {% endif %}
+
+    <form method="POST" enctype="multipart/form-data" action="/upload" id="uploadForm">
+
+      <div class="form-group">
+        <label>Resume (PDF only)</label>
+        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('resumeInput').click()">
+          <div class="icon">&#128196;</div>
+          <p>Click to browse or drag &amp; drop your PDF here</p>
+          <div class="file-name" id="fileName">No file chosen</div>
+          <input type="file" id="resumeInput" name="resume" accept=".pdf" required
+                 onchange="document.getElementById('fileName').textContent = this.files[0]?.name || 'No file chosen'"/>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="career_goal">Career Goal</label>
+        <select id="career_goal" name="career_goal" required>
+          <option value="" disabled selected>Select a career goal…</option>
+          {% for goal in career_goals %}
+            <option value="{{ goal }}">{{ goal }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block"
+              onclick="document.getElementById('loader').classList.add('show')">
+        Analyze Resume &rarr;
+      </button>
+    </form>
+  </div>
+
+  <div style="text-align:center;margin-top:8px">
+    <a href="/logout" class="btn btn-outline" style="padding:8px 20px;font-size:0.85rem">Logout</a>
+  </div>
+</div>
+
+<!-- Loader -->
+<div class="loader-overlay" id="loader">
+  <div class="spinner"></div>
+  <div class="loader-msg">Analyzing your resume…</div>
+</div>
+
+<script>
+  // Drag-and-drop
+  const zone = document.getElementById('uploadZone');
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      document.getElementById('resumeInput').files = e.dataTransfer.files;
+      document.getElementById('fileName').textContent = file.name;
+    }
+  });
+</script>
+</body>
+</html>

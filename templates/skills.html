@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MySkillCoach — Skill Matching</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">&#127919; MySkillCoach</span>
+  <div class="steps">
+    <a href="/upload" class="step-pill done">&#10003; 1 · Upload</a>
+    <span class="text-muted">›</span>
+    <span class="step-pill active">2 · Skills</span>
+    <span class="text-muted">›</span>
+    <span class="step-pill">3 · Analysis</span>
+  </div>
+</nav>
+
+<div class="container">
+
+  <div style="margin-bottom:24px">
+    <h1 style="font-size:1.6rem;font-weight:800;color:var(--white)">Skill Matching</h1>
+    <p class="text-muted" style="margin-top:6px">
+      Comparing your resume against
+      <strong style="color:var(--orange)">{{ career_goal }}</strong> job requirements.
+      Adjust any level that doesn't feel accurate — score updates live.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>&#128202; Skill Comparison Table</h2>
+
+    <div class="badge-wrap" style="margin-bottom:18px">
+      <span class="badge badge-strong">&#8679; Strong — above required</span>
+      <span class="badge badge-met">&#10003; Met — matches required</span>
+      <span class="badge badge-gap">&#9651; Gap — below required</span>
+      <span class="badge badge-missing">&#215; Missing — not in resume</span>
+    </div>
+
+    <form method="POST" action="/skills">
+      <div style="overflow-x:auto">
+        <table class="skill-table" id="skillTable">
+          <thead>
+            <tr>
+              <th style="width:32%">Skill</th>
+              <th style="width:24%">Your Level</th>
+              <th style="width:22%">Required Level</th>
+              <th style="width:22%">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            <tr>
+              <td>
+                <span style="font-weight:600">{{ row.skill }}</span>
+                {% if not row.in_resume %}
+                  <span class="text-muted" style="font-size:0.72rem;margin-left:6px">not in resume</span>
+                {% else %}
+                  <span class="text-muted" style="font-size:0.72rem;margin-left:6px">&#128196; in resume</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.in_resume %}
+                  <select class="level-select"
+                          name="level_{{ row.skill }}"
+                          data-req="{{ row.req_level }}"
+                          data-idx="{{ loop.index }}"
+                          onchange="updateStatus(this)">
+                    {% for lvl in levels %}
+                      <option value="{{ lvl }}" {% if lvl == row.suggested %}selected{% endif %}>{{ lvl }}</option>
+                    {% endfor %}
+                  </select>
+                  <div class="suggested-hint">&#x1f4a1; Auto-suggested from resume</div>
+                {% else %}
+                  <span class="text-muted" style="font-size:0.85rem">—</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.req_level != '—' %}
+                  <span class="badge badge-skill">{{ row.req_level }}</span>
+                {% else %}
+                  <span class="text-muted" style="font-size:0.85rem">Not required</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.in_resume and row.req_level != '—' %}
+                  {% set lmap = {'Beginner': 1, 'Mid': 2, 'Advanced': 3} %}
+                  {% set yours = lmap.get(row.suggested, 1) %}
+                  {% set req   = lmap.get(row.req_level, 2) %}
+                  {% if yours > req %}
+                    <span class="badge badge-strong" id="status_{{ loop.index }}">&#8679; Strong</span>
+                  {% elif yours == req %}
+                    <span class="badge badge-met"    id="status_{{ loop.index }}">&#10003; Met</span>
+                  {% else %}
+                    <span class="badge badge-gap"    id="status_{{ loop.index }}">&#9651; Gap</span>
+                  {% endif %}
+                {% elif not row.in_resume and row.req_level != '—' %}
+                  <span class="badge badge-missing" id="status_{{ loop.index }}">&#215; Missing</span>
+                {% else %}
+                  <span class="text-muted" id="status_{{ loop.index }}" style="font-size:0.85rem">—</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="action-row" style="margin-top:24px">
+        <a href="/upload" class="btn btn-outline">&#8249; Back</a>
+        <button type="submit" class="btn btn-primary" style="margin-left:auto">
+          Continue to Analysis &rarr;
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  const LEVEL_MAP = { Beginner: 1, Mid: 2, Advanced: 3 };
+
+  function updateStatus(sel) {
+    const idx   = sel.dataset.idx;
+    const badge = document.getElementById('status_' + idx);
+    const yours = LEVEL_MAP[sel.value] || 1;
+    const req   = LEVEL_MAP[sel.dataset.req] || 0;
+    if (!badge || req === 0) return;
+
+    if (yours > req)       { badge.className = 'badge badge-strong';  badge.innerHTML = '&#8679; Strong'; }
+    else if (yours === req){ badge.className = 'badge badge-met';     badge.innerHTML = '&#10003; Met'; }
+    else                   { badge.className = 'badge badge-gap';     badge.innerHTML = '&#9651; Gap'; }
+  }
+</script>
+</body>
+</html>
