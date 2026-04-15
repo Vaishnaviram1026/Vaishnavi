@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MySkillCoach — Welcome Back</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">&#127919; MySkillCoach</span>
+  <span class="text-muted" style="margin-left:auto;font-size:0.88rem">
+    {{ username }} &nbsp;|&nbsp; <a href="/logout" style="color:var(--orange)">Logout</a>
+  </span>
+</nav>
+
+<div class="container-sm" style="margin-top:60px">
+  <div class="card" style="text-align:center">
+
+    <div style="font-size:3rem;margin-bottom:12px">&#128075;</div>
+    <h2 style="font-size:1.5rem;margin-bottom:6px">Welcome back, {{ username }}!</h2>
+    <p class="text-muted" style="margin-bottom:24px">
+      You have a saved analysis for
+      <strong style="color:var(--orange)">{{ career_goal }}</strong>.
+      {% if updated_at %}
+        <br>Last updated: {{ updated_at.strftime('%b %d, %Y at %I:%M %p') }}
+      {% endif %}
+    </p>
+
+    <div style="display:flex;flex-direction:column;gap:12px">
+
+      <a href="/skills" class="btn btn-primary btn-block">
+        &#128202; Continue — View Skill Comparison
+      </a>
+
+      <a href="/analysis" class="btn btn-outline btn-block">
+        &#127775; View Full AI Analysis
+      </a>
+
+      <div style="border-top:1px solid var(--navy3);margin:8px 0"></div>
+
+      <a href="/upload" class="btn btn-outline btn-block"
+         style="border-color:var(--muted);color:var(--muted)">
+        &#128196; Upload New Resume &amp; Start Over
+      </a>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

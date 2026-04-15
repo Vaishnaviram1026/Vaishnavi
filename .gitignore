@@ -6,6 +6,10 @@ __pycache__/
 venv/
 .venv/
 
+# Database
+*.db
+*.sqlite3
+
 # Flask session files
 .flask_session/
 flask_session/
