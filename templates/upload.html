@@ -13,10 +13,21 @@
   <div class="steps">
     <span class="step-pill active">1 · Upload</span>
     <span class="text-muted">›</span>
-    <span class="step-pill">2 · Skills</span>
+    {% if has_profile %}
+      <a href="/skills" class="step-pill">2 · Skills</a>
+    {% else %}
+      <span class="step-pill" style="opacity:0.35;cursor:not-allowed" title="Upload a resume first">2 · Skills</span>
+    {% endif %}
     <span class="text-muted">›</span>
-    <span class="step-pill">3 · Analysis</span>
+    {% if has_levels %}
+      <a href="/analysis" class="step-pill">3 · Analysis</a>
+    {% else %}
+      <span class="step-pill" style="opacity:0.35;cursor:not-allowed" title="Complete skill matching first">3 · Analysis</span>
+    {% endif %}
   </div>
+  <span class="navbar-user">
+    {{ username }} &nbsp;|&nbsp; <a href="/logout">Logout</a>
+  </span>
 </nav>
 
 <div class="container-sm">
@@ -36,37 +47,71 @@
 
     <form method="POST" enctype="multipart/form-data" action="/upload" id="uploadForm">
 
+      {% if has_profile %}
+        <div class="alert alert-success" style="margin-bottom:18px">
+          &#128196; You have a saved resume for
+          <strong>{{ existing_goal }}</strong>.
+          Upload a new PDF below to replace it.
+        </div>
+      {% endif %}
+
       <div class="form-group">
-        <label>Resume (PDF only)</label>
+        <label>Resume (PDF or Word)</label>
         <div class="upload-zone" id="uploadZone" onclick="document.getElementById('resumeInput').click()">
           <div class="icon">&#128196;</div>
-          <p>Click to browse or drag &amp; drop your PDF here</p>
-          <div class="file-name" id="fileName">No file chosen</div>
-          <input type="file" id="resumeInput" name="resume" accept=".pdf" required
-                 onchange="document.getElementById('fileName').textContent = this.files[0]?.name || 'No file chosen'"/>
+          <p>
+            {% if has_profile %}Click to upload a new resume (replaces existing)
+            {% else %}Click to browse or drag &amp; drop your resume here{% endif %}
+          </p>
+          <p style="font-size:0.75rem;color:var(--muted);margin-top:4px">PDF or Word (.docx)</p>
+          <input type="file" id="resumeInput" name="resume" accept=".pdf,.docx"/>
+        </div>
+
+        <!-- File name row with eye icon -->
+        <div class="file-row">
+          <span class="file-name" id="fileName">
+            {% if has_resume_file %}resume_saved.pdf{% else %}No file chosen{% endif %}
+          </span>
+          <button type="button"
+                  class="eye-btn {% if has_resume_file %}visible{% endif %}"
+                  id="eyeBtn"
+                  onclick="togglePreview()"
+                  title="Preview resume">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Resume Preview -->
+        <div id="previewSection" style="display:none;margin-top:4px">
+          <div class="preview-header">
+            <span>&#128196; Resume Preview</span>
+            <button type="button" class="preview-close" onclick="togglePreview()">&#10005; Close</button>
+          </div>
+          <iframe id="resumePreview" title="Resume Preview"></iframe>
         </div>
       </div>
 
       <div class="form-group">
         <label for="career_goal">Career Goal</label>
         <select id="career_goal" name="career_goal" required>
-          <option value="" disabled selected>Select a career goal…</option>
+          <option value="" disabled {% if not saved_goal %}selected{% endif %}>Select a career goal…</option>
           {% for goal in career_goals %}
-            <option value="{{ goal }}">{{ goal }}</option>
+            <option value="{{ goal }}" {% if saved_goal == goal %}selected{% endif %}>{{ goal }}</option>
           {% endfor %}
         </select>
       </div>
 
-      <button type="submit" class="btn btn-primary btn-block"
-              onclick="document.getElementById('loader').classList.add('show')">
+      <button type="submit" class="btn btn-primary btn-block" id="analyzeBtn">
         Analyze Resume &rarr;
       </button>
     </form>
   </div>
 
-  <div style="text-align:center;margin-top:8px">
-    <a href="/logout" class="btn btn-outline" style="padding:8px 20px;font-size:0.85rem">Logout</a>
-  </div>
+
 </div>
 
 <!-- Loader -->
@@ -76,6 +121,63 @@
 </div>
 
 <script>
+  let previewSrc = null;
+  let useServer  = {{ 'true' if has_resume_file else 'false' }};
+  let isOpen     = false;
+
+  async function togglePreview() {
+    const section = document.getElementById('previewSection');
+    const btn     = document.getElementById('eyeBtn');
+    if (isOpen) {
+      section.style.display = 'none';
+      btn.classList.remove('active');
+      isOpen = false;
+      return;
+    }
+    const src = useServer ? '/resume/preview' : previewSrc;
+    if (!src) return;
+    document.getElementById('resumePreview').src = src;
+    section.style.display = 'block';
+    btn.classList.add('active');
+    isOpen = true;
+  }
+
+  async function setNewFile(file) {
+    if (previewSrc && previewSrc.startsWith('blob:')) URL.revokeObjectURL(previewSrc);
+    document.getElementById('fileName').textContent = file.name;
+    document.getElementById('eyeBtn').classList.add('visible');
+    useServer = false;
+
+    if (file.name.toLowerCase().endsWith('.pdf')) {
+      previewSrc = URL.createObjectURL(file);
+    } else {
+      // DOCX → send to server for HTML conversion
+      const fd = new FormData();
+      fd.append('file', file);
+      const resp = await fetch('/resume/convert', { method: 'POST', body: fd });
+      const html = await resp.text();
+      const blob = new Blob([html], { type: 'text/html' });
+      previewSrc = URL.createObjectURL(blob);
+    }
+
+    if (isOpen) document.getElementById('resumePreview').src = previewSrc;
+  }
+
+  document.getElementById('resumeInput').addEventListener('change', function() {
+    if (this.files[0]) setNewFile(this.files[0]);
+  });
+
+  document.getElementById('analyzeBtn').addEventListener('click', function(e) {
+    const hasFile   = document.getElementById('resumeInput').files.length > 0;
+    const hasSaved  = {{ 'true' if has_resume_file else 'false' }};
+    if (!hasFile && !hasSaved) {
+      e.preventDefault();
+      alert('Please upload a resume (PDF or Word) before continuing.');
+      return;
+    }
+    document.getElementById('loader').classList.add('show');
+  });
+
   // Drag-and-drop
   const zone = document.getElementById('uploadZone');
   zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
@@ -86,7 +188,7 @@
     const file = e.dataTransfer.files[0];
     if (file) {
       document.getElementById('resumeInput').files = e.dataTransfer.files;
-      document.getElementById('fileName').textContent = file.name;
+      setNewFile(file);
     }
   });
 </script>

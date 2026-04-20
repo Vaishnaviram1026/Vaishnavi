@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>MySkillCoach — Login</title>
+  <title>MySkillCoach — Sign In</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
 </head>
 <body>
@@ -14,7 +14,11 @@
 
 <div class="container-sm">
   <div class="card">
-    <h2>Sign In</h2>
+
+    <h2 id="formTitle">Sign In</h2>
+    <p class="text-muted" id="formSubtitle" style="font-size:0.88rem;margin-bottom:20px;margin-top:-8px">
+      Enter your username to get started.
+    </p>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -26,12 +30,19 @@
 
     <form method="POST" action="/">
 
+      <!-- Username -->
       <div class="form-group">
         <label for="username">Username</label>
-        <input type="text" id="username" name="username"
-               value="{{ username }}" placeholder="Enter your username" required/>
+        <div style="position:relative">
+          <input type="text" id="username" name="username"
+                 value="{{ username }}" placeholder="Enter your username"
+                 autocomplete="username" required/>
+          <span id="userStatus" class="user-status-icon"></span>
+        </div>
+        <div id="userHint" class="user-hint"></div>
       </div>
 
+      <!-- Password -->
       <div class="form-group">
         <label for="password">Password</label>
         <div class="password-wrapper">
@@ -39,35 +50,114 @@
                  placeholder="Enter your password" required/>
           <button type="button" class="toggle-pw" id="togglePw">&#128065;</button>
         </div>
-        <div class="requirements" id="reqs">
+        <!-- Requirements shown only for new users -->
+        <div class="requirements" id="reqs" style="display:none">
           <div class="req" id="req-length">At least 8 characters</div>
           <div class="req" id="req-upper">One uppercase letter (A–Z)</div>
           <div class="req" id="req-lower">One lowercase letter (a–z)</div>
           <div class="req" id="req-number">One number (0–9)</div>
-          <div class="req" id="req-special">One special character (!@#$%^&*)</div>
+          <div class="req" id="req-special">One special character (!@#$%^&amp;*)</div>
         </div>
       </div>
 
-      <div class="form-group">
+      <!-- Major (only for new users) -->
+      <div class="form-group" id="majorGroup" style="display:none">
         <label for="major">Major</label>
         <input type="text" id="major" name="major" value="Business" readonly/>
       </div>
 
-      <button type="submit" class="btn btn-primary btn-block">Login &rarr;</button>
+      <button type="submit" class="btn btn-primary btn-block" id="submitBtn" disabled>
+        Continue &rarr;
+      </button>
     </form>
   </div>
 </div>
 
 <script>
-  const togglePw  = document.getElementById('togglePw');
-  const passwordEl = document.getElementById('password');
+  const usernameEl  = document.getElementById('username');
+  const passwordEl  = document.getElementById('password');
+  const submitBtn   = document.getElementById('submitBtn');
+  const formTitle   = document.getElementById('formTitle');
+  const formSub     = document.getElementById('formSubtitle');
+  const reqs        = document.getElementById('reqs');
+  const majorGroup  = document.getElementById('majorGroup');
+  const userStatus  = document.getElementById('userStatus');
+  const userHint    = document.getElementById('userHint');
 
-  togglePw.addEventListener('click', () => {
-    const hidden = passwordEl.type === 'password';
-    passwordEl.type = hidden ? 'text' : 'password';
-    togglePw.textContent = hidden ? '🙈' : '👁';
+  // null = unknown, true = existing, false = new
+  let userExists = null;
+  let debounceTimer = null;
+
+  // ── Username lookup ────────────────────────────────────────────────────────
+  usernameEl.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    const val = usernameEl.value.trim();
+    userExists = null;
+    userStatus.textContent = '';
+    userStatus.className   = 'user-status-icon';
+    userHint.textContent   = '';
+    setMode(null);
+
+    if (!val) return;
+
+    userStatus.textContent = '…';
+    debounceTimer = setTimeout(() => {
+      fetch(`/check_username?username=${encodeURIComponent(val)}`)
+        .then(r => r.json())
+        .then(data => {
+          userExists = data.exists;
+          setMode(userExists);
+        });
+    }, 400);
   });
 
+  function setMode(exists) {
+    if (exists === null) {
+      // Unknown — reset everything
+      formTitle.textContent  = 'Sign In';
+      formSub.textContent    = 'Enter your username to get started.';
+      reqs.style.display     = 'none';
+      majorGroup.style.display = 'none';
+      submitBtn.textContent  = 'Continue →';
+      submitBtn.disabled     = true;
+      userStatus.textContent = '';
+      userStatus.className   = 'user-status-icon';
+      userHint.textContent   = '';
+    } else if (exists) {
+      // Existing user — login mode
+      formTitle.textContent  = 'Welcome Back!';
+      formSub.innerHTML      = 'We found your account. Enter your password to log in.';
+      reqs.style.display     = 'none';
+      majorGroup.style.display = 'none';
+      submitBtn.textContent  = 'Login →';
+      submitBtn.disabled     = false;
+      userStatus.textContent = '✔';
+      userStatus.className   = 'user-status-icon status-found';
+      userHint.textContent   = '';
+      userHint.className     = '';
+    } else {
+      // New user — register mode
+      formTitle.textContent  = 'Create Account';
+      formSub.innerHTML      = 'Username available! Set a password to create your account.';
+      reqs.style.display     = 'block';
+      majorGroup.style.display = 'block';
+      submitBtn.textContent  = 'Sign Up →';
+      submitBtn.disabled     = false;
+      userStatus.textContent = '✦';
+      userStatus.className   = 'user-status-icon status-new';
+      userHint.textContent   = '';
+      userHint.className     = '';
+    }
+  }
+
+  // Enable submit once password has something
+  passwordEl.addEventListener('input', () => {
+    if (userExists !== null) submitBtn.disabled = passwordEl.value.length === 0;
+    // Update requirements for new users
+    if (userExists === false) updateReqs(passwordEl.value);
+  });
+
+  // ── Password requirements (new users only) ─────────────────────────────────
   const rules = {
     'req-length':  v => v.length >= 8,
     'req-upper':   v => /[A-Z]/.test(v),
@@ -76,12 +166,20 @@
     'req-special': v => /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(v),
   };
 
-  passwordEl.addEventListener('input', () => {
-    const v = passwordEl.value;
-    for (const [id, test] of Object.entries(rules)) {
+  function updateReqs(v) {
+    for (const [id, test] of Object.entries(rules))
       document.getElementById(id).classList.toggle('met', test(v));
-    }
+  }
+
+  // ── Show/hide password ─────────────────────────────────────────────────────
+  document.getElementById('togglePw').addEventListener('click', () => {
+    const hidden = passwordEl.type === 'password';
+    passwordEl.type = hidden ? 'text' : 'password';
+    document.getElementById('togglePw').textContent = hidden ? '🙈' : '👁';
   });
+
+  // ── On page load: if username pre-filled (e.g. after error), re-check ──────
+  if (usernameEl.value.trim()) usernameEl.dispatchEvent(new Event('input'));
 </script>
 </body>
 </html>

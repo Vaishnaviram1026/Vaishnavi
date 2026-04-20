@@ -15,8 +15,15 @@
     <span class="text-muted">›</span>
     <span class="step-pill active">2 · Skills</span>
     <span class="text-muted">›</span>
-    <span class="step-pill">3 · Analysis</span>
+    {% if has_levels %}
+      <a href="/analysis" class="step-pill">3 · Analysis</a>
+    {% else %}
+      <span class="step-pill" style="opacity:0.35;cursor:not-allowed" title="Submit skill levels first">3 · Analysis</span>
+    {% endif %}
   </div>
+  <span class="navbar-user">
+    {{ username }} &nbsp;|&nbsp; <a href="/logout">Logout</a>
+  </span>
 </nav>
 
 <div class="container">
@@ -63,19 +70,20 @@
                 {% endif %}
               </td>
               <td>
+                <select class="level-select"
+                        name="level_{{ row.skill }}"
+                        data-req="{{ row.req_level }}"
+                        data-idx="{{ loop.index }}"
+                        onchange="updateStatus(this)">
+                  {% if not row.in_resume %}
+                    <option value="None" selected>None</option>
+                  {% endif %}
+                  {% for lvl in levels %}
+                    <option value="{{ lvl }}" {% if row.in_resume and lvl == row.suggested %}selected{% endif %}>{{ lvl }}</option>
+                  {% endfor %}
+                </select>
                 {% if row.in_resume %}
-                  <select class="level-select"
-                          name="level_{{ row.skill }}"
-                          data-req="{{ row.req_level }}"
-                          data-idx="{{ loop.index }}"
-                          onchange="updateStatus(this)">
-                    {% for lvl in levels %}
-                      <option value="{{ lvl }}" {% if lvl == row.suggested %}selected{% endif %}>{{ lvl }}</option>
-                    {% endfor %}
-                  </select>
                   <div class="suggested-hint">&#x1f4a1; Auto-suggested from resume</div>
-                {% else %}
-                  <span class="text-muted" style="font-size:0.85rem">—</span>
                 {% endif %}
               </td>
               <td>
@@ -86,19 +94,21 @@
                 {% endif %}
               </td>
               <td>
-                {% if row.in_resume and row.req_level != '—' %}
-                  {% set lmap = {'Beginner': 1, 'Mid': 2, 'Advanced': 3} %}
-                  {% set yours = lmap.get(row.suggested, 1) %}
-                  {% set req   = lmap.get(row.req_level, 2) %}
-                  {% if yours > req %}
-                    <span class="badge badge-strong" id="status_{{ loop.index }}">&#8679; Strong</span>
-                  {% elif yours == req %}
-                    <span class="badge badge-met"    id="status_{{ loop.index }}">&#10003; Met</span>
+                {% if row.req_level != '—' %}
+                  {% if not row.in_resume %}
+                    <span class="badge badge-missing" id="status_{{ loop.index }}">&#215; Missing</span>
                   {% else %}
-                    <span class="badge badge-gap"    id="status_{{ loop.index }}">&#9651; Gap</span>
+                    {% set lmap = {'Beginner': 1, 'Mid': 2, 'Advanced': 3} %}
+                    {% set yours = lmap.get(row.suggested, 1) %}
+                    {% set req   = lmap.get(row.req_level, 2) %}
+                    {% if yours > req %}
+                      <span class="badge badge-strong" id="status_{{ loop.index }}">&#8679; Strong</span>
+                    {% elif yours == req %}
+                      <span class="badge badge-met"    id="status_{{ loop.index }}">&#10003; Met</span>
+                    {% else %}
+                      <span class="badge badge-gap"    id="status_{{ loop.index }}">&#9651; Gap</span>
+                    {% endif %}
                   {% endif %}
-                {% elif not row.in_resume and row.req_level != '—' %}
-                  <span class="badge badge-missing" id="status_{{ loop.index }}">&#215; Missing</span>
                 {% else %}
                   <span class="text-muted" id="status_{{ loop.index }}" style="font-size:0.85rem">—</span>
                 {% endif %}
@@ -125,13 +135,18 @@
   function updateStatus(sel) {
     const idx   = sel.dataset.idx;
     const badge = document.getElementById('status_' + idx);
-    const yours = LEVEL_MAP[sel.value] || 1;
     const req   = LEVEL_MAP[sel.dataset.req] || 0;
-    if (!badge || req === 0) return;
+    if (!badge) return;
 
-    if (yours > req)       { badge.className = 'badge badge-strong';  badge.innerHTML = '&#8679; Strong'; }
-    else if (yours === req){ badge.className = 'badge badge-met';     badge.innerHTML = '&#10003; Met'; }
-    else                   { badge.className = 'badge badge-gap';     badge.innerHTML = '&#9651; Gap'; }
+    if (sel.value === 'None') {
+      badge.className = 'badge badge-missing'; badge.innerHTML = '&#215; Missing';
+      return;
+    }
+    if (req === 0) return;
+    const yours = LEVEL_MAP[sel.value] || 1;
+    if (yours > req)        { badge.className = 'badge badge-strong'; badge.innerHTML = '&#8679; Strong'; }
+    else if (yours === req) { badge.className = 'badge badge-met';    badge.innerHTML = '&#10003; Met'; }
+    else                    { badge.className = 'badge badge-gap';    badge.innerHTML = '&#9651; Gap'; }
   }
 </script>
 </body>

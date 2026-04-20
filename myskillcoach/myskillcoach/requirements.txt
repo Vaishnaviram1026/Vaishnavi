@@ -1,6 +1,0 @@
-flask
-flask-session
-pdfplumber
-spacy
-openai
-requests

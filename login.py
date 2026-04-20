@@ -4,10 +4,12 @@ import json
 import math
 import requests
 import pdfplumber
+import docx
+import mammoth
 import spacy
 from datetime import datetime
 from groq import Groq
-from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
@@ -235,17 +237,19 @@ def get_ai_gap_analysis(career_goal, skill_levels, required_skills):
     skills_summary = ', '.join(f"{s} ({l})" for s, l in skill_levels.items())
     prompt = f"""A student is targeting a {career_goal} role.
 Their current skills and levels: {skills_summary}
-Skills still needed: {gap_skills}
+Skills they need to improve: {gap_skills}
 
 Return ONLY a valid JSON object with these exact keys:
-- "score": integer 1-10
-- "assessment": string (2 sentences)
-- "strengths": list of 2-3 skill names
-- "resources": object where each key is a gap skill and value is:
-  {{"title": "...", "url": "...", "type": "Course|Video|Project|Docs"}}
+- "assessment": string (2 sentences about overall readiness)
+- "strengths": list of 2-3 skill names the student is strong in
+- "soft_skills_required": list of 4-6 soft skill names most important for a {career_goal}
+- "resources": object where each key is a gap skill name and value is an object with:
+  - "free_platforms": list of objects with "name" (string) and optionally "url" (string, only include url if you are 100% certain it is correct and currently active — omit url key entirely if unsure)
+  - "paid_platforms": list of platform name strings only (no urls)
+  - "topics": list of 5-6 key topic strings a student should learn at Mid/Intermediate level for that skill
 
-Free resources only: YouTube, freeCodeCamp, Coursera (audit), Khan Academy, official docs, roadmap.sh.
-No markdown — only JSON."""
+Only include gap skills in "resources". Free platforms: YouTube, freeCodeCamp, Coursera (audit), Khan Academy, official docs, roadmap.sh, W3Schools.
+No markdown — only valid JSON."""
     response = client.chat.completions.create(
         model='llama-3.3-70b-versatile',
         messages=[{'role': 'user', 'content': prompt}],
@@ -287,7 +291,36 @@ def load_profile_into_session(user):
 user_resume_store = {}
 
 
+# ── Context processor — injects nav state into every template ─────────────────
+
+@app.context_processor
+def inject_nav():
+    has_profile    = False
+    has_levels     = False
+    existing_goal  = ''
+    if 'user_id' in session:
+        user = db.session.get(User, session['user_id'])
+        if user and user.profile:
+            has_profile   = True
+            existing_goal = user.profile.career_goal or ''
+            has_levels    = bool(user.profile.skill_levels)
+    return {
+        'has_profile':   has_profile,
+        'has_levels':    has_levels,
+        'existing_goal': existing_goal,
+    }
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
+
+@app.route('/check_username')
+def check_username():
+    username = request.args.get('username', '').strip()
+    if not username:
+        return {'exists': False}
+    exists = User.query.filter_by(username=username).first() is not None
+    return {'exists': exists}
+
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
@@ -355,14 +388,41 @@ def upload():
         career_goal = request.form.get('career_goal', '')
         file        = request.files.get('resume')
 
-        if not file or file.filename == '':
-            error = 'Please upload a PDF resume.'
-        elif not file.filename.lower().endswith('.pdf'):
-            error = 'Only PDF files are supported.'
+        import io
+        fname      = (file.filename or '').lower()
+        new_file   = file and file.filename != ''
+        uid        = session['user_id']
+        uploads_dir = os.path.join(os.path.dirname(__file__), 'uploads')
+
+        # Check for saved resume on disk
+        saved_path = None
+        for ext in ('.pdf', '.docx'):
+            p = os.path.join(uploads_dir, f"{uid}{ext}")
+            if os.path.exists(p):
+                saved_path = p
+                break
+
+        if not new_file and not saved_path:
+            error = 'Please upload a resume (PDF or Word).'
+        elif new_file and not (fname.endswith('.pdf') or fname.endswith('.docx')):
+            error = 'Only PDF (.pdf) and Word (.docx) files are supported.'
         else:
             try:
-                with pdfplumber.open(file) as pdf:
-                    resume_text = ' '.join(page.extract_text() or '' for page in pdf.pages)
+                if new_file:
+                    file_bytes = file.read()
+                else:
+                    # Re-use saved resume
+                    with open(saved_path, 'rb') as fh:
+                        file_bytes = fh.read()
+                    fname = saved_path.rsplit('.', 1)[-1].lower()   # 'pdf' or 'docx'
+                    fname = '.' + fname   # make it '.pdf' or '.docx' for the checks below
+
+                if fname.endswith('.pdf'):
+                    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                        resume_text = ' '.join(page.extract_text() or '' for page in pdf.pages)
+                else:
+                    doc = docx.Document(io.BytesIO(file_bytes))
+                    resume_text = ' '.join(p.text for p in doc.paragraphs)
 
                 if not resume_text.strip():
                     error = 'Could not extract text from the PDF. Ensure it is not a scanned image.'
@@ -400,6 +460,17 @@ def upload():
                     db.session.add(profile)
                     db.session.commit()
 
+                    # Save file to disk for preview (only when a new file was uploaded)
+                    if new_file:
+                        os.makedirs(uploads_dir, exist_ok=True)
+                        ext = '.pdf' if fname.endswith('.pdf') else '.docx'
+                        with open(os.path.join(uploads_dir, f"{user.id}{ext}"), 'wb') as fh:
+                            fh.write(file_bytes)
+                        other_ext = '.docx' if ext == '.pdf' else '.pdf'
+                        other_path = os.path.join(uploads_dir, f"{user.id}{other_ext}")
+                        if os.path.exists(other_path):
+                            os.remove(other_path)
+
                     # Store in session + server-side store
                     user_resume_store[session['username']] = resume_text
                     session['career_goal']     = career_goal
@@ -412,13 +483,89 @@ def upload():
             except Exception as e:
                 error = f'Error processing file: {str(e)}'
 
+    # Pre-fill career goal from saved profile
+    user = db.session.get(User, session['user_id'])
+    saved_goal = user.profile.career_goal if (user and user.profile) else ''
+
+    uploads_dir = os.path.join(os.path.dirname(__file__), 'uploads')
+    uid = session['user_id']
+    has_resume_file = (os.path.exists(os.path.join(uploads_dir, f"{uid}.pdf")) or
+                       os.path.exists(os.path.join(uploads_dir, f"{uid}.docx")))
+
     return render_template(
         'upload.html',
         username=session['username'],
         career_goals=CAREER_GOALS,
+        saved_goal=saved_goal,
         error=error,
         api_key_missing=api_key_missing,
+        has_resume_file=has_resume_file,
     )
+
+
+def _docx_bytes_to_preview_html(file_bytes):
+    """Convert DOCX bytes to a styled, self-contained HTML string."""
+    import io
+    result = mammoth.convert_to_html(io.BytesIO(file_bytes))
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+  body{{font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.7;
+       color:#1a1a1a;max-width:820px;margin:0 auto;padding:36px 52px;background:#fff}}
+  h1,h2,h3{{color:#0d1b2a;margin-top:1.2em;margin-bottom:.4em}}
+  p{{margin-bottom:.7em}} ul,ol{{padding-left:1.6em;margin-bottom:.7em}}
+  table{{border-collapse:collapse;width:100%;margin-bottom:1em}}
+  td,th{{border:1px solid #ccc;padding:6px 10px;text-align:left}}
+  strong{{font-weight:700}} a{{color:#e8611a}}
+</style></head><body>{result.value}</body></html>"""
+
+
+@app.route('/resume')
+def serve_resume():
+    """Download the raw resume file."""
+    if 'user_id' not in session:
+        return '', 403
+    uploads_dir = os.path.join(os.path.dirname(__file__), 'uploads')
+    for ext, mime in [('.pdf', 'application/pdf'),
+                      ('.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')]:
+        path = os.path.join(uploads_dir, f"{session['user_id']}{ext}")
+        if os.path.exists(path):
+            return send_file(path, mimetype=mime)
+    return '', 404
+
+
+@app.route('/resume/preview')
+def preview_resume():
+    """Serve resume for in-browser preview: PDF directly, DOCX as HTML."""
+    if 'user_id' not in session:
+        return '', 403
+    uploads_dir = os.path.join(os.path.dirname(__file__), 'uploads')
+    pdf_path  = os.path.join(uploads_dir, f"{session['user_id']}.pdf")
+    docx_path = os.path.join(uploads_dir, f"{session['user_id']}.docx")
+    if os.path.exists(pdf_path):
+        return send_file(pdf_path, mimetype='application/pdf')
+    if os.path.exists(docx_path):
+        with open(docx_path, 'rb') as f:
+            html = _docx_bytes_to_preview_html(f.read())
+        return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
+    return '', 404
+
+
+@app.route('/resume/convert', methods=['POST'])
+def convert_resume():
+    """Convert an uploaded DOCX to HTML for client-side preview (no save)."""
+    file = request.files.get('file')
+    if not file:
+        return '', 400
+    fname = file.filename.lower()
+    file_bytes = file.read()
+    if fname.endswith('.pdf'):
+        import io
+        from flask import Response
+        return Response(file_bytes, mimetype='application/pdf')
+    if fname.endswith('.docx'):
+        html = _docx_bytes_to_preview_html(file_bytes)
+        return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
+    return '', 415
 
 
 @app.route('/skills', methods=['GET', 'POST'])
@@ -437,11 +584,8 @@ def skills():
         skill_levels = {}
         for item in required_skills:
             skill    = item['skill']
-            presence = skill_presence.get(skill, {})
-            skill_levels[skill] = (
-                request.form.get(f'level_{skill}', 'Beginner')
-                if presence.get('in_resume') else 'Missing'
-            )
+            val      = request.form.get(f'level_{skill}', 'None')
+            skill_levels[skill] = 'Missing' if val == 'None' else val
 
         # ── Save skill levels to database ─────────────────────────────────────
         user    = User.query.get(session['user_id'])
@@ -511,20 +655,30 @@ def analysis():
             'req_pct':    int((req_val  / 3) * 100),
         })
 
-    score         = ai_result['score']            if ai_result else 0
-    resources     = ai_result.get('resources', {}) if ai_result else {}
-    strengths     = ai_result.get('strengths', []) if ai_result else []
-    assessment    = ai_result.get('assessment', '') if ai_result else ''
+    resources        = ai_result.get('resources', {})        if ai_result else {}
+    strengths        = ai_result.get('strengths', [])        if ai_result else []
+    assessment       = ai_result.get('assessment', '')       if ai_result else ''
+    soft_skills      = ai_result.get('soft_skills_required', []) if ai_result else []
+
+    # Compute score as percentage: average of (your_val / req_val) capped at 1.0
+    scored_items = [b for b in breakdown if b['req_val'] > 0]
+    if scored_items:
+        ratio_sum = sum(min(b['your_val'] / b['req_val'], 1.0) for b in scored_items)
+        score_pct = round((ratio_sum / len(scored_items)) * 100)
+    else:
+        score_pct = 0
+
     circumference = 2 * math.pi * 54
-    dash_offset   = circumference * (1 - score / 10)
+    dash_offset   = circumference * (1 - score_pct / 100)
 
     return render_template(
         'analysis.html',
         username=session['username'],
         career_goal=career_goal,
-        score=score,
+        score=score_pct,
         assessment=assessment,
         strengths=strengths,
+        soft_skills=soft_skills,
         breakdown=breakdown,
         resources=resources,
         circumference=round(circumference, 2),

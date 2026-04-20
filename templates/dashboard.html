@@ -10,8 +10,19 @@
 
 <nav class="navbar">
   <span class="brand">&#127919; MySkillCoach</span>
-  <span class="text-muted" style="margin-left:auto;font-size:0.88rem">
-    {{ username }} &nbsp;|&nbsp; <a href="/logout" style="color:var(--orange)">Logout</a>
+  <div class="steps">
+    <a href="/upload" class="step-pill done">&#10003; 1 · Upload</a>
+    <span class="text-muted">›</span>
+    <a href="/skills" class="step-pill done">&#10003; 2 · Skills</a>
+    <span class="text-muted">›</span>
+    {% if has_levels %}
+      <a href="/analysis" class="step-pill done">&#10003; 3 · Analysis</a>
+    {% else %}
+      <span class="step-pill" style="opacity:0.35;cursor:not-allowed">3 · Analysis</span>
+    {% endif %}
+  </div>
+  <span class="navbar-user">
+    {{ username }} &nbsp;|&nbsp; <a href="/logout">Logout</a>
   </span>
 </nav>
 
