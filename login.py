@@ -161,13 +161,41 @@ def suggest_skill_level(skill, resume_text):
 
 
 def fetch_jsearch_descriptions(job_title, num=5):
-    url     = 'https://jsearch.p.rapidapi.com/search'
-    headers = {'X-RapidAPI-Key': JSEARCH_API_KEY, 'X-RapidAPI-Host': 'jsearch.p.rapidapi.com'}
-    params  = {'query': f'{job_title} jobs', 'num_pages': '1', 'date_posted': 'month'}
-    resp    = requests.get(url, headers=headers, params=params, timeout=10)
-    resp.raise_for_status()
+    """Try RapidAPI format first, then direct JSearch API format."""
+    params = {'query': f'{job_title} jobs', 'num_pages': '1', 'date_posted': 'month',
+              'country': 'us', 'language': 'en'}
+
+    # Try RapidAPI format
+    try:
+        headers = {'X-RapidAPI-Key': JSEARCH_API_KEY,
+                   'X-RapidAPI-Host': 'jsearch.p.rapidapi.com'}
+        resp = requests.get('https://jsearch.p.rapidapi.com/search',
+                            headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json().get('data', [])
+        if data:
+            return _extract_descriptions(data[:num])
+    except Exception as e:
+        print(f'[JSearch RapidAPI] {e}')
+
+    # Try direct JSearch API format (ak_... keys)
+    try:
+        headers = {'Authorization': f'Bearer {JSEARCH_API_KEY}'}
+        resp = requests.get('https://api.jsearch.io/search',
+                            headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json().get('data', [])
+        if data:
+            return _extract_descriptions(data[:num])
+    except Exception as e:
+        print(f'[JSearch Direct] {e}')
+
+    return []
+
+
+def _extract_descriptions(jobs):
     descriptions = []
-    for job in resp.json().get('data', [])[:num]:
+    for job in jobs:
         parts = []
         if job.get('job_description'):
             parts.append(job['job_description'][:2000])
@@ -181,22 +209,33 @@ def fetch_jsearch_descriptions(job_title, num=5):
     return descriptions
 
 
+# Role-specific skill hints so Groq returns distinct results per career goal
+_ROLE_HINTS = {
+    'Data Analyst':        'SQL, Python, Excel, Tableau, Power BI, statistics, data cleaning',
+    'Business Analyst':    'requirements gathering, Jira, Excel, SQL, process mapping, Visio, BPMN',
+    'Marketing Analyst':   'Google Analytics, SEO, A/B testing, Tableau, HubSpot, Excel, Meta Ads',
+    'Finance Analyst':     'Excel, financial modelling, SQL, Bloomberg, Tableau, SAP, accounting',
+    'Project Manager':     'Jira, MS Project, Agile, Scrum, risk management, Confluence, PMP',
+    'Prompt Engineer':     'LLMs, Python, prompt design, LangChain, OpenAI API, RAG, fine-tuning',
+    'Product Manager':     'roadmapping, Jira, user research, A/B testing, SQL, Figma, analytics',
+    'Operations Manager':  'ERP systems, Six Sigma, process improvement, Excel, SAP, supply chain',
+}
+
+
 def get_required_skills(job_title):
     if not GROQ_API_KEY:
         return None
-    job_descriptions, jsearch_used = [], False
-    if JSEARCH_API_KEY:
-        try:
-            job_descriptions = fetch_jsearch_descriptions(job_title)
-            jsearch_used     = bool(job_descriptions)
-        except Exception:
-            pass
 
-    if jsearch_used:
+    job_descriptions = []
+    if JSEARCH_API_KEY:
+        job_descriptions = fetch_jsearch_descriptions(job_title)
+
+    if job_descriptions:
         combined = '\n\n---\n\n'.join(job_descriptions)
         prompt = (
             f'Below are real job descriptions for {job_title} roles.\n\n{combined[:6000]}\n\n'
-            'Extract the TOP 10 most frequently required technical and data visualization skills. '
+            f'Extract the TOP 10 most frequently required technical and data visualization skills '
+            f'specifically for a {job_title}. '
             'NO soft skills. Only tools, technologies, languages, platforms, BI/visualization tools. '
             'Normalize names ("MS Excel"→"Excel"). No duplicates. '
             'Return ONLY a valid JSON array of exactly 10 unique items. '
@@ -204,9 +243,14 @@ def get_required_skills(job_title):
             '"category" (Technical|Visualization). No markdown, no explanation.'
         )
     else:
+        hint = _ROLE_HINTS.get(job_title, '')
+        hint_line = f'Key tools commonly seen for this role: {hint}. ' if hint else ''
         prompt = (
             f'List the top 10 technical and data visualization skills most commonly required '
-            f'for a "{job_title}" role based on real job postings in 2025. '
+            f'for a "{job_title}" role in 2025 job postings. '
+            f'{hint_line}'
+            f'These skills must be SPECIFIC to a {job_title} — do NOT return generic skills '
+            f'that would appear for any role. '
             'NO soft skills. Only tools, technologies, languages, platforms, BI/visualization tools. '
             'No duplicates. '
             'Return ONLY a valid JSON array of exactly 10 unique items. '
@@ -217,7 +261,7 @@ def get_required_skills(job_title):
     response = client.chat.completions.create(
         model='llama-3.3-70b-versatile',
         messages=[{'role': 'user', 'content': prompt}],
-        temperature=0.2,
+        temperature=0.4,
     )
     raw = response.choices[0].message.content.strip()
     raw = re.sub(r'^```[a-z]*\n?', '', raw)
