@@ -9,7 +9,7 @@
 <body>
 
 <nav class="navbar">
-  <span class="brand">&#127919; MySkillCoach</span>
+  <a href="/dashboard" class="brand">&#127919; MySkillCoach</a>
   <div class="steps">
     <a href="/upload" class="step-pill done">&#10003; 1 · Upload</a>
     <span class="text-muted">›</span>
@@ -72,18 +72,19 @@
               <td>
                 <select class="level-select"
                         name="level_{{ row.skill }}"
+                        data-skill="{{ row.skill }}"
                         data-req="{{ row.req_level }}"
                         data-idx="{{ loop.index }}"
                         onchange="updateStatus(this)">
-                  {% if not row.in_resume %}
-                    <option value="None" selected>None</option>
-                  {% endif %}
+                  <option value="None" {% if not row.suggested %}selected{% endif %}>None</option>
                   {% for lvl in levels %}
-                    <option value="{{ lvl }}" {% if row.in_resume and lvl == row.suggested %}selected{% endif %}>{{ lvl }}</option>
+                    <option value="{{ lvl }}" {% if lvl == row.suggested %}selected{% endif %}>{{ lvl }}</option>
                   {% endfor %}
                 </select>
-                {% if row.in_resume %}
+                {% if row.in_resume and not row.saved_by_user %}
                   <div class="suggested-hint">&#x1f4a1; Auto-suggested from resume</div>
+                {% elif row.saved_by_user %}
+                  <div class="suggested-hint" style="color:var(--emerald)">&#10003; Saved</div>
                 {% endif %}
               </td>
               <td>
@@ -95,7 +96,7 @@
               </td>
               <td>
                 {% if row.req_level != '—' %}
-                  {% if not row.in_resume %}
+                  {% if not row.suggested %}
                     <span class="badge badge-missing" id="status_{{ loop.index }}">&#215; Missing</span>
                   {% else %}
                     {% set lmap = {'Beginner': 1, 'Mid': 2, 'Advanced': 3} %}
@@ -132,6 +133,16 @@
 <script>
   const LEVEL_MAP = { Beginner: 1, Mid: 2, Advanced: 3 };
 
+  // ── Auto-save to server on every change ───────────────────────────────────
+  function autosave(skill, level) {
+    fetch('/skills/autosave', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skill, level }),
+    });
+  }
+
+  // ── Live status badge + save ───────────────────────────────────────────────
   function updateStatus(sel) {
     const idx   = sel.dataset.idx;
     const badge = document.getElementById('status_' + idx);
@@ -140,6 +151,7 @@
 
     if (sel.value === 'None') {
       badge.className = 'badge badge-missing'; badge.innerHTML = '&#215; Missing';
+      autosave(sel.dataset.skill, 'None');
       return;
     }
     if (req === 0) return;
@@ -147,6 +159,8 @@
     if (yours > req)        { badge.className = 'badge badge-strong'; badge.innerHTML = '&#8679; Strong'; }
     else if (yours === req) { badge.className = 'badge badge-met';    badge.innerHTML = '&#10003; Met'; }
     else                    { badge.className = 'badge badge-gap';    badge.innerHTML = '&#9651; Gap'; }
+
+    autosave(sel.dataset.skill, sel.value);
   }
 </script>
 </body>

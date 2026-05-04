@@ -3,17 +3,21 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>MySkillCoach — Welcome Back</title>
+  <title>MySkillCoach — Dashboard</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
 </head>
 <body>
 
 <nav class="navbar">
-  <span class="brand">&#127919; MySkillCoach</span>
+  <a href="/dashboard" class="brand">&#127919; MySkillCoach</a>
   <div class="steps">
     <a href="/upload" class="step-pill done">&#10003; 1 · Upload</a>
     <span class="text-muted">›</span>
-    <a href="/skills" class="step-pill done">&#10003; 2 · Skills</a>
+    {% if has_profile %}
+      <a href="/skills" class="step-pill done">&#10003; 2 · Skills</a>
+    {% else %}
+      <span class="step-pill" style="opacity:0.35;cursor:not-allowed">2 · Skills</span>
+    {% endif %}
     <span class="text-muted">›</span>
     {% if has_levels %}
       <a href="/analysis" class="step-pill done">&#10003; 3 · Analysis</a>
@@ -26,39 +30,88 @@
   </span>
 </nav>
 
-<div class="container-sm" style="margin-top:60px">
-  <div class="card" style="text-align:center">
+<div class="container">
 
-    <div style="font-size:3rem;margin-bottom:12px">&#128075;</div>
-    <h2 style="font-size:1.5rem;margin-bottom:6px">Welcome back, {{ username }}!</h2>
-    <p class="text-muted" style="margin-bottom:24px">
-      You have a saved analysis for
-      <strong style="color:var(--orange)">{{ career_goal }}</strong>.
-      {% if updated_at %}
-        <br>Last updated: {{ updated_at.strftime('%b %d, %Y at %I:%M %p') }}
-      {% endif %}
-    </p>
-
-    <div style="display:flex;flex-direction:column;gap:12px">
-
-      <a href="/skills" class="btn btn-primary btn-block">
-        &#128202; Continue — View Skill Comparison
-      </a>
-
-      <a href="/analysis" class="btn btn-outline btn-block">
-        &#127775; View Full AI Analysis
-      </a>
-
-      <div style="border-top:1px solid var(--navy3);margin:8px 0"></div>
-
-      <a href="/upload" class="btn btn-outline btn-block"
-         style="border-color:var(--muted);color:var(--muted)">
-        &#128196; Upload New Resume &amp; Start Over
-      </a>
-
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;flex-wrap:wrap;gap:12px">
+    <div>
+      <h1 style="font-size:1.6rem;font-weight:800;color:var(--white);margin-bottom:4px">
+        &#128075; Welcome back, {{ username }}!
+      </h1>
+      <p class="text-muted" style="font-size:0.9rem">
+        {% if has_profile %}
+          Continue your analysis or start fresh with a new resume.
+        {% else %}
+          Upload your resume to get started with your first career goal analysis.
+        {% endif %}
+      </p>
     </div>
+    <a href="/upload" class="btn btn-primary">&#43; New Analysis</a>
   </div>
-</div>
 
+  {% if has_profile %}
+  <div class="card" style="max-width:560px">
+
+    <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+
+      {% if has_levels %}
+      <!-- Score ring -->
+      <div style="position:relative;flex-shrink:0">
+        <svg width="100" height="100" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="38" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="6"/>
+          <circle cx="50" cy="50" r="38" fill="none"
+            stroke="{% if score_pct >= 80 %}var(--emerald){% elif score_pct >= 50 %}var(--sky){% else %}var(--amber){% endif %}"
+            stroke-width="6" stroke-linecap="round"
+            stroke-dasharray="{{ (2 * 3.14159 * 38)|round(2) }}"
+            stroke-dashoffset="{{ ((2 * 3.14159 * 38) * (1 - score_pct / 100))|round(2) }}"
+            transform="rotate(-90 50 50)"
+            style="transition:stroke-dashoffset 1s ease"/>
+        </svg>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+          <span style="font-size:1.3rem;font-weight:800;color:var(--white)">{{ score_pct }}%</span>
+        </div>
+      </div>
+      {% endif %}
+
+      <div style="flex:1;min-width:0">
+        <div style="font-size:0.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">
+          Current Career Goal
+        </div>
+        <div style="font-size:1.15rem;font-weight:800;color:var(--orange);margin-bottom:{% if has_levels %}4px{% else %}0{% endif %}">
+          {{ career_goal }}
+        </div>
+        {% if has_levels %}
+          <div style="font-size:0.75rem;color:var(--muted)">Readiness Score</div>
+          {% if updated_at %}
+            <div style="font-size:0.72rem;color:var(--muted);margin-top:2px">
+              Last updated: {{ updated_at.strftime('%b %d, %Y') }}
+            </div>
+          {% endif %}
+        {% else %}
+          <div style="font-size:0.8rem;color:var(--muted);margin-top:4px">&#9201; Skill levels not set yet</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+      {% if has_levels %}
+        <a href="/analysis" class="btn btn-primary" style="flex:1;justify-content:center">&#127775; View Analysis</a>
+        <a href="/skills" class="btn btn-outline" style="padding:9px 16px" title="Edit skill levels">&#9998; Edit Skills</a>
+      {% else %}
+        <a href="/skills" class="btn btn-primary" style="flex:1;justify-content:center">&#128202; Set Skill Levels</a>
+      {% endif %}
+    </div>
+
+  </div>
+
+  {% else %}
+  <div class="card" style="text-align:center;padding:48px 32px">
+    <div style="font-size:3rem;margin-bottom:16px">&#128203;</div>
+    <h2 style="margin-bottom:8px">No analysis yet</h2>
+    <p class="text-muted" style="margin-bottom:24px">Upload your resume to get started with your first career goal analysis.</p>
+    <a href="/upload" class="btn btn-primary">&#128196; Upload Resume</a>
+  </div>
+  {% endif %}
+
+</div>
 </body>
 </html>

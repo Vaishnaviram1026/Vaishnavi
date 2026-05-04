@@ -9,7 +9,7 @@
 <body>
 
 <nav class="navbar">
-  <span class="brand">&#127919; MySkillCoach</span>
+  <a href="/dashboard" class="brand">&#127919; MySkillCoach</a>
   <div class="steps">
     <span class="step-pill active">1 · Upload</span>
     <span class="text-muted">›</span>
@@ -34,6 +34,11 @@
   <div class="card">
     <h2>&#128196; Upload Your Resume</h2>
 
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ 'success' if category == 'success' else 'error' }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
     {% if error %}
       <div class="alert alert-error">{{ error }}</div>
     {% endif %}

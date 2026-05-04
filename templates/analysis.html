@@ -9,7 +9,7 @@
 <body>
 
 <nav class="navbar">
-  <span class="brand">&#127919; MySkillCoach</span>
+  <a href="/dashboard" class="brand">&#127919; MySkillCoach</a>
   <div class="steps">
     <a href="/upload"   class="step-pill done">&#10003; 1 · Upload</a>
     <span class="text-muted">›</span>
@@ -73,6 +73,21 @@
     </div>
   </div>
 
+  <!-- Congratulations Banner (all skills matched) -->
+  {% if all_matched %}
+  <div class="congrats-card">
+    <div class="congrats-icon">&#127881;</div>
+    <div>
+      <div class="congrats-title">Congratulations — You're Ready for <span style="color:var(--emerald)">{{ career_goal }}</span>!</div>
+      <p class="congrats-sub">
+        All required skills are at <strong style="color:var(--emerald)">Met</strong> or
+        <strong style="color:var(--emerald)">Strong</strong> level.
+        Make sure you're confident in the soft skills and topic areas below to truly stand out.
+      </p>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Breakdown Table -->
   <div class="card">
     <h2>&#128203; Skill Breakdown</h2>
@@ -133,7 +148,39 @@
   {% endif %}
 
   <!-- What to Do Next -->
-  {% if resources %}
+  {% if all_matched and topics_to_review %}
+  <div class="card">
+    <h2>&#128218; Topics to Be Confident In</h2>
+    <p class="text-muted" style="font-size:0.88rem;margin-bottom:18px">
+      Since all your skills are matched, make sure you are solid on these topics per skill before your interviews.
+    </p>
+    <div style="overflow-x:auto">
+      <table class="skill-table">
+        <thead>
+          <tr>
+            <th style="width:25%">Skill</th>
+            <th>Key Topics to Be Confident In</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for skill, topics in topics_to_review.items() %}
+          <tr>
+            <td style="font-weight:700;color:var(--emerald)">{{ skill }}</td>
+            <td>
+              <ul style="margin:0;padding-left:16px;font-size:0.85rem;line-height:1.8">
+                {% for topic in topics %}
+                  <li>{{ topic }}</li>
+                {% endfor %}
+              </ul>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% elif resources %}
   <div class="card">
     <h2>&#127775; What to Do Next</h2>
     <p class="text-muted" style="font-size:0.88rem;margin-bottom:18px">

@@ -76,6 +76,11 @@ GENERIC_MID = [
 
 # ── Database Models ────────────────────────────────────────────────────────────
 
+def goal_slug(career_goal):
+    """'Data Analyst' → 'data_analyst'  (used in file names)"""
+    return career_goal.lower().replace(' ', '_').replace('/', '_')
+
+
 class User(db.Model):
     __tablename__ = 'users'
     id            = db.Column(db.Integer, primary_key=True)
@@ -94,24 +99,39 @@ class User(db.Model):
 
 
 class UserProfile(db.Model):
+    """One profile per user — stores resume analysis and skill levels."""
     __tablename__   = 'user_profiles'
     id              = db.Column(db.Integer, primary_key=True)
     user_id         = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     career_goal     = db.Column(db.String(100))
     resume_text     = db.Column(db.Text)
-    required_skills = db.Column(db.Text)   # JSON string
-    skill_presence  = db.Column(db.Text)   # JSON string
-    skill_levels    = db.Column(db.Text)   # JSON string
+    required_skills = db.Column(db.Text)
+    skill_presence  = db.Column(db.Text)
+    skill_levels    = db.Column(db.Text)
     updated_at      = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    def get_required_skills(self):
-        return json.loads(self.required_skills or '[]')
+    def get_required_skills(self): return json.loads(self.required_skills or '[]')
+    def get_skill_presence(self):  return json.loads(self.skill_presence  or '{}')
+    def get_skill_levels(self):    return json.loads(self.skill_levels    or '{}')
 
-    def get_skill_presence(self):
-        return json.loads(self.skill_presence or '{}')
 
-    def get_skill_levels(self):
-        return json.loads(self.skill_levels or '{}')
+class UserAnalysis(db.Model):
+    """One record per (user, career_goal) — multiple per user."""
+    __tablename__   = 'user_analyses'
+    id              = db.Column(db.Integer, primary_key=True)
+    user_id         = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    career_goal     = db.Column(db.String(100), nullable=False)
+    resume_text     = db.Column(db.Text, default='')
+    required_skills = db.Column(db.Text, default='[]')
+    skill_presence  = db.Column(db.Text, default='{}')
+    skill_levels    = db.Column(db.Text, nullable=True)
+    updated_at      = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__  = (db.UniqueConstraint('user_id', 'career_goal', name='uq_user_career'),)
+
+    def get_required_skills(self): return json.loads(self.required_skills or '[]')
+    def get_skill_presence(self):  return json.loads(self.skill_presence  or '{}')
+    def get_skill_levels(self):    return json.loads(self.skill_levels) if self.skill_levels else None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -279,7 +299,21 @@ def get_ai_gap_analysis(career_goal, skill_levels, required_skills):
         if yours < req:
             gap_skills.append(item['skill'])
     skills_summary = ', '.join(f"{s} ({l})" for s, l in skill_levels.items())
-    prompt = f"""A student is targeting a {career_goal} role.
+    all_matched = len(gap_skills) == 0
+
+    if all_matched:
+        prompt = f"""A student targeting a {career_goal} role has ALL required skills at Met or Strong level.
+Their skills: {skills_summary}
+
+Return ONLY a valid JSON object with these exact keys:
+- "assessment": string (2 warm congratulatory sentences confirming they are ready for the role)
+- "strengths": list of 3 skill names they are strongest in
+- "soft_skills_required": list of 4-6 soft skill names most important for a {career_goal}
+- "topics_to_review": object where each key is a skill name (from their skill list) and value is a list of 5-6 key topic strings they should be confident in at a professional level for a {career_goal}
+
+No markdown — only valid JSON."""
+    else:
+        prompt = f"""A student is targeting a {career_goal} role.
 Their current skills and levels: {skills_summary}
 Skills they need to improve: {gap_skills}
 
@@ -317,7 +351,7 @@ def gap_status(your_level_str, required_level_str):
 
 
 def load_profile_into_session(user):
-    """Load a user's saved profile from DB into session."""
+    """Load user's profile into session on login."""
     profile = user.profile
     if not profile:
         return False
@@ -325,7 +359,6 @@ def load_profile_into_session(user):
     session['required_skills'] = profile.get_required_skills()
     session['skill_presence']  = profile.get_skill_presence()
     session['skill_levels']    = profile.get_skill_levels()
-    # Store resume text in server-side dict
     if profile.resume_text:
         user_resume_store[user.username] = profile.resume_text
     return True
@@ -339,15 +372,15 @@ user_resume_store = {}
 
 @app.context_processor
 def inject_nav():
-    has_profile    = False
-    has_levels     = False
-    existing_goal  = ''
+    has_profile   = False
+    has_levels    = False
+    existing_goal = ''
     if 'user_id' in session:
         user = db.session.get(User, session['user_id'])
-        if user and user.profile:
-            has_profile   = True
-            existing_goal = user.profile.career_goal or ''
-            has_levels    = bool(user.profile.skill_levels)
+        if user:
+            has_profile   = user.profile is not None
+            existing_goal = session.get('career_goal', '')
+            has_levels    = bool(session.get('skill_levels'))
     return {
         'has_profile':   has_profile,
         'has_levels':    has_levels,
@@ -387,7 +420,8 @@ def login():
             session['username'] = username
             session['user_id']  = user.id
             has_profile = load_profile_into_session(user)
-            return redirect(url_for('dashboard') if has_profile else url_for('upload'))
+            flash(f'Welcome back, {username}!', 'success')
+            return redirect(url_for('upload'))
         else:
             # New user — validate password format then register
             errors.extend(validate_password(password))
@@ -410,13 +444,39 @@ def login():
 def dashboard():
     if 'username' not in session:
         return redirect(url_for('login'))
-    user    = User.query.get(session['user_id'])
-    profile = user.profile if user else None
+    user = db.session.get(User, session['user_id'])
+    if not user:
+        return redirect(url_for('login'))
+
+    profile    = user.profile
+    score_pct  = 0
+    has_levels = False
+    career_goal = session.get('career_goal', '')
+    updated_at  = None
+
+    if profile and profile.skill_levels:
+        has_levels = True
+        updated_at = profile.updated_at
+        levels = profile.get_skill_levels()
+        req    = profile.get_required_skills()
+        scored = []
+        for item in req:
+            rl     = LEVEL_MAP.get(item['level'].replace('Intermediate', 'Mid'), 2)
+            yl_str = levels.get(item['skill'], 'Beginner')
+            yl     = LEVEL_MAP.get(yl_str, 1) if yl_str != 'Missing' else 0
+            if rl > 0:
+                lbl, _ = gap_status(yl_str, item['level'])
+                scored.append(1.0 if lbl in ('Met', 'Strong') else min(yl / rl, 1.0))
+        score_pct = round(sum(scored) / len(scored) * 100) if scored else 0
+
     return render_template(
         'dashboard.html',
         username=session['username'],
-        career_goal=session.get('career_goal', ''),
-        updated_at=profile.updated_at if profile else None,
+        career_goal=career_goal,
+        score_pct=score_pct,
+        has_levels=has_levels,
+        updated_at=updated_at,
+        has_profile=profile is not None,
     )
 
 
@@ -429,19 +489,19 @@ def upload():
     api_key_missing = not GROQ_API_KEY
 
     if request.method == 'POST':
-        career_goal = request.form.get('career_goal', '')
-        file        = request.files.get('resume')
-
+        career_goal  = request.form.get('career_goal', '')
+        file         = request.files.get('resume')
         import io
-        fname      = (file.filename or '').lower()
-        new_file   = file and file.filename != ''
-        uid        = session['user_id']
-        uploads_dir = os.path.join(os.path.dirname(__file__), 'uploads')
+        fname        = (file.filename or '').lower()
+        new_file     = bool(file and file.filename)
+        uid          = session['user_id']
+        uploads_dir  = os.path.join(os.path.dirname(__file__), 'uploads')
+        slug         = goal_slug(career_goal)
 
-        # Check for saved resume on disk
+        # Saved resume for this career goal
         saved_path = None
         for ext in ('.pdf', '.docx'):
-            p = os.path.join(uploads_dir, f"{uid}{ext}")
+            p = os.path.join(uploads_dir, f"{uid}_{slug}{ext}")
             if os.path.exists(p):
                 saved_path = p
                 break
@@ -455,11 +515,9 @@ def upload():
                 if new_file:
                     file_bytes = file.read()
                 else:
-                    # Re-use saved resume
                     with open(saved_path, 'rb') as fh:
                         file_bytes = fh.read()
-                    fname = saved_path.rsplit('.', 1)[-1].lower()   # 'pdf' or 'docx'
-                    fname = '.' + fname   # make it '.pdf' or '.docx' for the checks below
+                    fname = '.' + saved_path.rsplit('.', 1)[-1].lower()
 
                 if fname.endswith('.pdf'):
                     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
@@ -469,20 +527,16 @@ def upload():
                     resume_text = ' '.join(p.text for p in doc.paragraphs)
 
                 if not resume_text.strip():
-                    error = 'Could not extract text from the PDF. Ensure it is not a scanned image.'
+                    error = 'Could not extract text from the file. Ensure it is not a scanned image.'
                 else:
                     required_skills = get_required_skills(career_goal) if (career_goal and not api_key_missing) else []
-
-                    # Deduplicate
                     seen, deduped = set(), []
                     for item in (required_skills or []):
                         key = item['skill'].lower().strip()
                         if key not in seen:
-                            seen.add(key)
-                            deduped.append(item)
+                            seen.add(key); deduped.append(item)
                     required_skills = deduped
 
-                    # Check each required skill in resume
                     skill_presence = {}
                     for item in required_skills:
                         skill = item['skill']
@@ -492,58 +546,55 @@ def upload():
                             'suggested_level': suggest_skill_level(skill, resume_text) if found else None,
                         }
 
-                    # ── Save to database ──────────────────────────────────────
-                    user    = User.query.get(session['user_id'])
-                    profile = user.profile or UserProfile(user_id=user.id)
+                    # ── Upsert into UserProfile ───────────────────────────────
+                    user    = db.session.get(User, uid)
+                    profile = user.profile or UserProfile(user_id=uid)
                     profile.career_goal     = career_goal
                     profile.resume_text     = resume_text
                     profile.required_skills = json.dumps(required_skills)
                     profile.skill_presence  = json.dumps(skill_presence)
-                    profile.skill_levels    = None   # reset on new upload
-                    profile.updated_at      = datetime.utcnow()
+                    profile.skill_levels    = None
                     db.session.add(profile)
                     db.session.commit()
 
-                    # Save file to disk for preview (only when a new file was uploaded)
+                    # Save file per goal
                     if new_file:
                         os.makedirs(uploads_dir, exist_ok=True)
                         ext = '.pdf' if fname.endswith('.pdf') else '.docx'
-                        with open(os.path.join(uploads_dir, f"{user.id}{ext}"), 'wb') as fh:
+                        with open(os.path.join(uploads_dir, f"{uid}_{slug}{ext}"), 'wb') as fh:
                             fh.write(file_bytes)
                         other_ext = '.docx' if ext == '.pdf' else '.pdf'
-                        other_path = os.path.join(uploads_dir, f"{user.id}{other_ext}")
-                        if os.path.exists(other_path):
-                            os.remove(other_path)
+                        other = os.path.join(uploads_dir, f"{uid}_{slug}{other_ext}")
+                        if os.path.exists(other): os.remove(other)
 
-                    # Store in session + server-side store
                     user_resume_store[session['username']] = resume_text
                     session['career_goal']     = career_goal
                     session['required_skills'] = required_skills
                     session['skill_presence']  = skill_presence
                     session.pop('skill_levels', None)
-
                     return redirect(url_for('skills'))
 
             except Exception as e:
                 error = f'Error processing file: {str(e)}'
 
-    # Pre-fill career goal from saved profile
-    user = db.session.get(User, session['user_id'])
-    saved_goal = user.profile.career_goal if (user and user.profile) else ''
-
-    uploads_dir = os.path.join(os.path.dirname(__file__), 'uploads')
-    uid = session['user_id']
-    has_resume_file = (os.path.exists(os.path.join(uploads_dir, f"{uid}.pdf")) or
-                       os.path.exists(os.path.join(uploads_dir, f"{uid}.docx")))
+    user         = db.session.get(User, session['user_id'])
+    uploads_dir  = os.path.join(os.path.dirname(__file__), 'uploads')
+    uid          = session['user_id']
+    active_goal  = session.get('career_goal', '')
+    slug         = goal_slug(active_goal) if active_goal else ''
+    has_resume_file = active_goal and any(
+        os.path.exists(os.path.join(uploads_dir, f"{uid}_{slug}{ext}"))
+        for ext in ('.pdf', '.docx')
+    )
 
     return render_template(
         'upload.html',
         username=session['username'],
         career_goals=CAREER_GOALS,
-        saved_goal=saved_goal,
+        saved_goal=active_goal,
         error=error,
         api_key_missing=api_key_missing,
-        has_resume_file=has_resume_file,
+        has_resume_file=bool(has_resume_file),
     )
 
 
@@ -563,35 +614,38 @@ def _docx_bytes_to_preview_html(file_bytes):
 </style></head><body>{result.value}</body></html>"""
 
 
-@app.route('/resume')
-def serve_resume():
-    """Download the raw resume file."""
-    if 'user_id' not in session:
-        return '', 403
+def _resume_path(uid, career_goal):
+    """Return (path, mime) for a user+goal's resume file, or (None, None)."""
     uploads_dir = os.path.join(os.path.dirname(__file__), 'uploads')
+    slug = goal_slug(career_goal)
     for ext, mime in [('.pdf', 'application/pdf'),
                       ('.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')]:
-        path = os.path.join(uploads_dir, f"{session['user_id']}{ext}")
-        if os.path.exists(path):
-            return send_file(path, mimetype=mime)
+        p = os.path.join(uploads_dir, f"{uid}_{slug}{ext}")
+        if os.path.exists(p):
+            return p, mime
+    return None, None
+
+
+@app.route('/resume')
+def serve_resume():
+    if 'user_id' not in session: return '', 403
+    cg = session.get('career_goal', '')
+    path, mime = _resume_path(session['user_id'], cg)
+    if path: return send_file(path, mimetype=mime)
     return '', 404
 
 
 @app.route('/resume/preview')
 def preview_resume():
-    """Serve resume for in-browser preview: PDF directly, DOCX as HTML."""
-    if 'user_id' not in session:
-        return '', 403
-    uploads_dir = os.path.join(os.path.dirname(__file__), 'uploads')
-    pdf_path  = os.path.join(uploads_dir, f"{session['user_id']}.pdf")
-    docx_path = os.path.join(uploads_dir, f"{session['user_id']}.docx")
-    if os.path.exists(pdf_path):
-        return send_file(pdf_path, mimetype='application/pdf')
-    if os.path.exists(docx_path):
-        with open(docx_path, 'rb') as f:
-            html = _docx_bytes_to_preview_html(f.read())
-        return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
-    return '', 404
+    if 'user_id' not in session: return '', 403
+    cg = session.get('career_goal', '')
+    path, mime = _resume_path(session['user_id'], cg)
+    if not path: return '', 404
+    if mime == 'application/pdf':
+        return send_file(path, mimetype='application/pdf')
+    with open(path, 'rb') as f:
+        html = _docx_bytes_to_preview_html(f.read())
+    return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
 
 
 @app.route('/resume/convert', methods=['POST'])
@@ -632,29 +686,43 @@ def skills():
             skill_levels[skill] = 'Missing' if val == 'None' else val
 
         # ── Save skill levels to database ─────────────────────────────────────
-        user    = User.query.get(session['user_id'])
-        profile = user.profile
+        user    = db.session.get(User, session['user_id'])
+        profile = user.profile if user else None
         if profile:
             profile.skill_levels = json.dumps(skill_levels)
-            profile.updated_at   = datetime.utcnow()
             db.session.commit()
 
         session['skill_levels'] = skill_levels
         return redirect(url_for('analysis'))
 
+    saved_levels = session.get('skill_levels', {})
     rows = []
     for item in required_skills:
         skill     = item['skill']
         req_level = item['level'].replace('Intermediate', 'Mid')
         presence  = skill_presence.get(skill, {})
+        saved     = saved_levels.get(skill)
+
+        # Label always reflects actual resume detection — never changes
         in_resume = presence.get('in_resume', False)
-        suggested = presence.get('suggested_level') or 'Beginner'
+
+        if saved and saved != 'Missing':
+            # User saved a real level — select it in the dropdown
+            suggested = saved
+        elif saved == 'Missing' or not in_resume:
+            # Explicitly missing or not in resume — select None
+            suggested = None
+        else:
+            # In resume, no saved value — use spaCy suggestion
+            suggested = presence.get('suggested_level') or 'Beginner'
+
         rows.append({
-            'skill':     skill,
-            'in_resume': in_resume,
-            'suggested': suggested,
-            'req_level': req_level,
-            'category':  item.get('category', 'Technical'),
+            'skill':        skill,
+            'in_resume':    in_resume,
+            'suggested':    suggested,
+            'req_level':    req_level,
+            'category':     item.get('category', 'Technical'),
+            'saved_by_user': saved is not None,
         })
 
     return render_template(
@@ -664,6 +732,30 @@ def skills():
         rows=rows,
         levels=['Beginner', 'Mid', 'Advanced'],
     )
+
+
+@app.route('/skills/autosave', methods=['POST'])
+def skills_autosave():
+    if 'username' not in session:
+        return {'ok': False}, 401
+    data  = request.get_json()
+    skill = data.get('skill', '').strip()
+    level = data.get('level', '').strip()
+    if not skill or not level:
+        return {'ok': False}, 400
+
+    skill_levels = dict(session.get('skill_levels') or {})
+    skill_levels[skill] = 'Missing' if level == 'None' else level
+    session['skill_levels'] = skill_levels
+    session.modified = True
+
+    user    = db.session.get(User, session['user_id'])
+    profile = user.profile if user else None
+    if profile:
+        profile.skill_levels = json.dumps(skill_levels)
+        db.session.commit()
+
+    return {'ok': True}
 
 
 @app.route('/analysis')
@@ -687,6 +779,7 @@ def analysis():
         your_level = skill_levels.get(skill, 'Beginner')
         your_val   = LEVEL_MAP.get(your_level, 1) if your_level != 'Missing' else 0
         label, css = gap_status(your_level, item['level'])
+        your_pct = 100 if label in ('Met', 'Strong') else int((your_val / 3) * 100)
         breakdown.append({
             'skill':      skill,
             'your_val':   your_val,
@@ -695,14 +788,18 @@ def analysis():
             'req_label':  req_norm,
             'status':     label,
             'css':        css,
-            'your_pct':   int((your_val / 3) * 100),
+            'your_pct':   your_pct,
             'req_pct':    int((req_val  / 3) * 100),
         })
 
-    resources        = ai_result.get('resources', {})        if ai_result else {}
-    strengths        = ai_result.get('strengths', [])        if ai_result else []
-    assessment       = ai_result.get('assessment', '')       if ai_result else ''
+    resources        = ai_result.get('resources', {})           if ai_result else {}
+    topics_to_review = ai_result.get('topics_to_review', {})    if ai_result else {}
+    strengths        = ai_result.get('strengths', [])           if ai_result else []
+    assessment       = ai_result.get('assessment', '')          if ai_result else ''
     soft_skills      = ai_result.get('soft_skills_required', []) if ai_result else []
+
+    # All matched = no Gap or Missing statuses
+    all_matched = all(b['status'] in ('Strong', 'Met') for b in breakdown)
 
     # Compute score as percentage: average of (your_val / req_val) capped at 1.0
     scored_items = [b for b in breakdown if b['req_val'] > 0]
@@ -725,6 +822,8 @@ def analysis():
         soft_skills=soft_skills,
         breakdown=breakdown,
         resources=resources,
+        topics_to_review=topics_to_review,
+        all_matched=all_matched,
         circumference=round(circumference, 2),
         dash_offset=round(dash_offset, 2),
         api_key_missing=not GROQ_API_KEY,
@@ -742,5 +841,5 @@ def logout():
 
 if __name__ == '__main__':
     with app.app_context():
-        db.create_all()   # creates tables if they don't exist
+        db.create_all()
     app.run(debug=True)
